@@ -6,7 +6,8 @@ const mutlter = require("multer");
 const path = require("path");
 const cors = require("cors");
 const multer = require("multer");
-// const { type } = require("os");
+const jwt = require("jsonwebtoken");
+const { error } = require("console");
 
 app.use(express.json());
 app.use(cors());
@@ -74,6 +75,71 @@ const Product = mongoose.model("Product", {
     default: true,
   },
 });
+const Users = mongoose.model("Users", {
+  name: {
+    type: String,
+  },
+  email: {
+    type: String,
+    require: true,
+  },
+  password: {
+    type: String,
+  },
+  cartData: {
+    type: Object,
+  },
+  date: {
+    type: Date,
+    default: Date.now,
+  },
+});
+app.post("/signup", async (req, res) => {
+  let checkUser = await Users.findOne({ email: req.body.email });
+  if (checkUser) {
+    return res.status(400).json({ success: false, error: "email da ton tai" });
+  }
+  let cart = {};
+  for (let i = 0; i < 300; i++) {
+    cart[i] = 0;
+  }
+  const user = new Users({
+    name: req.body.name,
+    email: req.body.email,
+    password: req.body.password,
+    cartData: cart,
+  });
+  await user.save();
+  const data = {
+    user: {
+      id: user.id,
+    },
+  };
+  const token = jwt.sign(data, "secret_ecom");
+  res.json({ success: true, token });
+});
+app.post("/login", async (req, res) => {
+  let user = await Users.findOne({ email: req.body.email });
+  if (user) {
+    const passCompare = req.body.password === user.password;
+    if (passCompare) {
+      const data = {
+        user: {
+          id: user.id,
+        },
+      };
+      const token = jwt.sign(data, "secret_ecom");
+      res.json({
+        success: true,
+        token,
+      });
+    } else {
+      res.json({ success: false, error: "sai mat khau" });
+    }
+  } else {
+    res.json({ success: false, error: "wrong email id" });
+  }
+});
 // post product leen
 app.post("/addproduct", async (req, res) => {
   let products = await Product.find({});
@@ -112,6 +178,55 @@ app.post("/removeproduct", async (req, res) => {
 app.get("/allproducts", async (req, res) => {
   let products = await Product.find({});
   res.send(products);
+});
+app.get("/collection", async (req, res) => {
+  let product = await Product.find({});
+  let newCollection = product.slice(1).slice(-8);
+  res.send(newCollection);
+});
+app.get("/bestseller", async (req, res) => {
+  const product = await Product.find({});
+  const bestSeller = product.slice(-4);
+  res.send(bestSeller);
+});
+const fetchUser = async (req, res, next) => {
+  const token = req.header("auth-token");
+  if (!token) {
+    res.status(401).send({ errors: "vui long xac thuc" });
+  } else {
+    try {
+      const data = jwt.verify(token, "secret_ecom");
+      req.user = data.user;
+      next();
+    } catch (err) {
+      res.status(404).send({ error: "vui long xac thuc token" });
+    }
+  }
+};
+app.post("/addtocart", fetchUser, async (req, res) => {
+  console.log(req.body, req.user);
+  let userData = await Users.findOne({ _id: req.user.id });
+  userData.cartData[req.body.itemId] += 1;
+  await Users.findOneAndUpdate(
+    { _id: req.user.id },
+    { cartData: userData.cartData }
+  );
+  res.json({ message: "added" });
+});
+app.post("/removefromcart", fetchUser, async (req, res) => {
+  console.log(req.body, req.user);
+  let userData = await Users.findOne({ _id: req.user.id });
+  if (userData.cartData[req.body.itemId] > 0)
+    userData.cartData[req.body.itemId] -= 1;
+  await Users.findOneAndUpdate(
+    { _id: req.user.id },
+    { cartData: userData.cartData }
+  );
+  res.json({ message: "removed" });
+});
+app.get("/getcart", async (req, res) => {
+  const userData = await Users.findOne({ _id: req.user.id });
+  res.json(userData.cartData);
 });
 app.listen(port, (err) => {
   if (!err) {
